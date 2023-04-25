@@ -1,0 +1,83 @@
+name: JReleaser Builder
+
+description: 'JReleaser Java Builder'
+
+inputs:
+  slsa-workflow-inputs:
+    description: 'All the inputs'
+    required: true
+  slsa-layout-file:
+    description: 'Location to store the layout content'
+    required: true
+  slsa-workflow-secret1:
+    description: 'secret1'
+    required: true
+  slsa-workflow-secret2:
+    description: 'secret2'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch_depth: 0
+
+    - name: Set up Java
+      uses: actions/setup-java@v3
+      with:
+        distribution: ${{ fromJson(inputs.slsa-workflow-inputs).java-distribution }}
+        java-version: ${{ fromJson(inputs.slsa-workflow-inputs).java-version }}
+        cache: ${{ fromJson(inputs.slsa-workflow-inputs).build-tool }}
+
+    - name: Assemble
+      uses: jreleaser/release-action@v2
+      with:
+        version: early-access
+        arguments: assemble
+        setup-java: false
+      env:
+        CI: 'true'
+        JRELEASER_PROJECT_VERSION: ${{ fromJson(inputs.slsa-workflow-inputs).project-version }}
+
+    - name: Release
+      uses: jreleaser/release-action@v2
+      with:
+        version: early-access
+        arguments: release
+        setup-java: false
+      env:
+        JRELEASER_PROJECT_VERSION: ${{ fromJson(inputs.slsa-workflow-inputs).project-version }}
+        JRELEASER_GITHUB_TOKEN: ${{ inputs.slsa-workflow-secret1 }}
+
+    - name: Make outputs
+      id: make-outputs
+      shell: bash
+      env:
+        SLSA_OUTPUTS_ARTIFACTS_FILE: ${{ inputs.slsa-layout-file }}
+      run: |
+        # "version" and "attestations" fields:
+        echo -e -n "{\n  \"version\": 1,\n  \"attestations\": [" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
+        
+        find ./out/jreleaser/assemble/** -type f -print0 | while read -d $'\0' fname
+        do
+          if [[ $fname ==*.zip ]]
+          then
+            bn=$(basename -- $fname)
+            hash=$(sha256sum $fname | awk '{print $1}')
+            echo -n "
+                {
+                  \"name\": \"${bn}-attestation.intoto\",
+                  \"subjects\": [
+                    { \"name\": \"${bn}\",
+                    \"digest\": { \"sha256\": \"${hash}\"  }
+                    }
+                  ]
+                }" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
+          done
+        done
+        
+        # Close "attestations" and "version":
+        echo -e "\n  ]" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
+        echo "}" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
+        cat "$SLSA_OUTPUTS_ARTIFACTS_FILE"

@@ -1,0 +1,63 @@
+name: JReleaser Java SLSA Generator
+
+on:
+  workflow_call:
+    inputs:
+      project-version:
+        description: 'The project version'
+        required: true
+        type: string
+      java-version:
+        description: 'Java version'
+        required: false
+        default: 11
+        type: number
+      java-distribution:
+        description: 'Java distribution'
+        required: false
+        default: zulu
+        type: string
+      build-tool:
+        description: 'Build tool'
+        required: false
+        default: maven
+        type: string
+      rekor-log-public:
+        description: 'private'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      github-token:
+        required: true
+
+jobs:
+  slsa-setup:
+    permissions:
+      id-token: write # For token creation.
+    outputs:
+      slsa-token: ${{ steps.generate.outputs.slsa-token }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generate the token
+        id: generate
+        uses: slsa-framework/slsa-github-generator/actions/delegator/setup-token@main
+        with:
+          slsa-workflow-recipient: 'delegator_generic_slsa3.yml'
+          slsa-rekor-log-public: ${{ inputs.rekor-log-public }}
+          slsa-runner-label: 'ubuntu-latest'
+          slsa-build-action-path: './builder'
+          slsa-workflow-inputs: ${{ toJson(inputs) }}
+
+  slsa-run:
+    needs: [ slsa-setup ]
+    permissions:
+      id-token: write # For signing.
+      contents: write # For asset uploads.
+      actions: read   # For the entrypoint.
+      packages: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/delegator_generic_slsa3.yml@main
+    with:
+      slsa-token: ${{ needs.slsa-setup.outputs.slsa-token }}
+    secrets:
+      secret1: ${{ secrets.github-token }}
