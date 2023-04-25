@@ -21,7 +21,7 @@ runs:
   steps:
     - uses: actions/checkout@v3
       with:
-        fetch_depth: 0
+        fetch-depth: 0
 
     - name: Set up Java
       uses: actions/setup-java@v3
@@ -40,6 +40,15 @@ runs:
         CI: 'true'
         JRELEASER_PROJECT_VERSION: ${{ fromJson(inputs.slsa-workflow-inputs).project-version }}
 
+    - name: JReleaser output
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: jreleaser-assemble
+        path: |
+          out/jreleaser/trace.log
+          out/jreleaser/output.properties
+
     - name: Release
       uses: jreleaser/release-action@v2
       with:
@@ -50,22 +59,30 @@ runs:
         JRELEASER_PROJECT_VERSION: ${{ fromJson(inputs.slsa-workflow-inputs).project-version }}
         JRELEASER_GITHUB_TOKEN: ${{ inputs.slsa-workflow-secret1 }}
 
-    - name: Make outputs
-      id: make-outputs
+    - name: JReleaser output
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: jreleaser-release
+        path: |
+          out/jreleaser/trace.log
+          out/jreleaser/output.properties
+
+    - name: SLSA outputs
       shell: bash
       env:
         SLSA_OUTPUTS_ARTIFACTS_FILE: ${{ inputs.slsa-layout-file }}
       run: |
         # "version" and "attestations" fields:
-        echo -e -n "{\n  \"version\": 1,\n  \"attestations\": [" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
+        echo "{ \"version\": 1,  \"attestations\": [" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
         
         find ./out/jreleaser/assemble/** -type f -print0 | while read -d $'\0' fname
         do
-          if [[ $fname ==*.zip ]]
+          if [[ $fname == *.zip ]]
           then
             bn=$(basename -- $fname)
             hash=$(sha256sum $fname | awk '{print $1}')
-            echo -n "
+            echo "
                 {
                   \"name\": \"${bn}-attestation.intoto\",
                   \"subjects\": [
@@ -74,10 +91,10 @@ runs:
                     }
                   ]
                 }" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
-          done
+          fi
         done
         
         # Close "attestations" and "version":
-        echo -e "\n  ]" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
+        echo "  ]" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
         echo "}" >> "$SLSA_OUTPUTS_ARTIFACTS_FILE"
         cat "$SLSA_OUTPUTS_ARTIFACTS_FILE"
